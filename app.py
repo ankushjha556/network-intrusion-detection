@@ -8,7 +8,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from autoencoder import NetworkAutoencoder
+from src.autoencoder import NetworkAutoencoder
 
 
 # =========================================================
@@ -33,21 +33,20 @@ st.markdown("""
 
 html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
-    background-color: #030712;
+}
+
+.stApp {
+    background:
+        radial-gradient(circle at top left, rgba(16,185,129,0.10), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(99,102,241,0.10), transparent 30%),
+        #020617;
     color: white;
 }
 
-[data-testid="stAppViewContainer"] {
-    background:
-        radial-gradient(circle at top left, rgba(16,185,129,0.12), transparent 30%),
-        radial-gradient(circle at bottom right, rgba(99,102,241,0.12), transparent 30%),
-        #030712;
-}
-
 .block-container {
+    max-width: 1450px;
     padding-top: 2rem;
     padding-bottom: 2rem;
-    max-width: 1450px;
 }
 
 section[data-testid="stSidebar"] {
@@ -58,14 +57,14 @@ section[data-testid="stSidebar"] {
 .metric-card {
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
-    padding: 1.2rem;
     border-radius: 18px;
+    padding: 1.2rem;
 }
 
-.main-title {
+.hero-title {
     font-size: 4rem;
     font-weight: 900;
-    line-height: 1.0;
+    line-height: 1;
     background: linear-gradient(
         90deg,
         #ffffff,
@@ -79,38 +78,38 @@ section[data-testid="stSidebar"] {
 .subtitle {
     color: #94a3b8;
     font-size: 1rem;
-    line-height: 1.7;
+    line-height: 1.8;
 }
 
 .attack-box {
-    background: rgba(239,68,68,0.12);
-    border: 1px solid rgba(239,68,68,0.4);
+    background: rgba(239,68,68,0.10);
+    border: 1px solid rgba(239,68,68,0.35);
     border-radius: 18px;
-    padding: 1.5rem;
+    padding: 1.4rem;
 }
 
 .normal-box {
-    background: rgba(16,185,129,0.12);
-    border: 1px solid rgba(16,185,129,0.4);
+    background: rgba(16,185,129,0.10);
+    border: 1px solid rgba(16,185,129,0.35);
     border-radius: 18px;
-    padding: 1.5rem;
+    padding: 1.4rem;
 }
 
-.stButton>button {
+.stButton > button {
     width: 100%;
-    border-radius: 14px;
     height: 3.2rem;
+    border-radius: 14px;
+    border: none;
     font-weight: 700;
     background: linear-gradient(
         90deg,
         #10b981,
         #059669
     );
-    border: none;
     color: white;
 }
 
-.stButton>button:hover {
+.stButton > button:hover {
     background: linear-gradient(
         90deg,
         #059669,
@@ -121,8 +120,9 @@ section[data-testid="stSidebar"] {
 </style>
 """, unsafe_allow_html=True)
 
+
 # =========================================================
-# MODEL LINKS
+# GOOGLE DRIVE FILES
 # =========================================================
 
 FILES = {
@@ -143,8 +143,9 @@ FILES = {
     "1ZSBujLvO1lWAzdSMgzX_BV6JWKtoYNsV"
 }
 
+
 # =========================================================
-# DOWNLOAD + LOAD MODELS
+# LOAD MODELS
 # =========================================================
 
 @st.cache_resource
@@ -158,26 +159,35 @@ def load_models():
 
         if not os.path.exists(filepath):
 
+            url = f"https://drive.google.com/uc?id={file_id}"
+
             gdown.download(
-                f"https://drive.google.com/uc?id={file_id}",
+                url,
                 filepath,
                 quiet=False
             )
 
-    config = joblib.load("models/config.pkl")
+    # Load config
+    config = joblib.load(
+        "models/config.pkl"
+    )
 
+    # Load scaler
     scaler = joblib.load(
         "models/scaler_ae.pkl"
     )
 
+    # Load IF
     isolation_forest = joblib.load(
         "models/isolation_forest.pkl"
     )
 
+    # Load OCSVM
     ocsvm = joblib.load(
         "models/ocsvm.pkl"
     )
 
+    # Load Autoencoder
     model = NetworkAutoencoder(
         input_dim=config["input_dim"],
         latent_dim=config["latent_dim"]
@@ -202,12 +212,13 @@ def load_models():
 
 
 # =========================================================
-# LOAD MODELS
+# LOAD EVERYTHING
 # =========================================================
 
-with st.spinner("Loading NetGuard AI models..."):
+with st.spinner("Loading NetGuard AI..."):
 
     scaler, isolation_forest, ocsvm, config, model = load_models()
+
 
 # =========================================================
 # SIDEBAR
@@ -218,19 +229,17 @@ with st.sidebar:
     st.title("🛡️ NetGuard AI")
 
     st.markdown("""
-    Advanced Hybrid Intrusion Detection System
+    Hybrid Deep-Learning Intrusion Detection System
     """)
 
     st.divider()
 
-    st.subheader("📊 Model Metrics")
+    st.subheader("📊 Performance")
 
     st.metric("ROC-AUC", "0.7168")
     st.metric("AUPRC", "0.5853")
     st.metric("Precision", "82.64%")
     st.metric("False Alarm Rate", "2.17%")
-    st.metric("Latent Space", "8-D")
-    st.metric("Dataset", "CICIDS2017")
 
     st.divider()
 
@@ -240,37 +249,50 @@ with st.sidebar:
     - Deep Autoencoder
     - Isolation Forest
     - One-Class SVM
-    - Latent-Space Detection
+    - Latent Space Detection
     - Unsupervised Learning
     """)
 
+    st.divider()
+
+    st.subheader("📁 Dataset")
+
+    st.markdown("""
+    - CICIDS2017
+    - 2.83M network flows
+    - 14 attack categories
+    """)
+
+
 # =========================================================
-# HERO SECTION
+# HERO
 # =========================================================
 
 st.markdown("""
-<div class="main-title">
+<div class="hero-title">
 NetGuard AI
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="subtitle">
-Hybrid deep-learning intrusion detection system using latent-space anomaly analysis.
-The autoencoder learns normal traffic representations while Isolation Forest and
-One-Class SVM detect abnormal network behavior in compressed feature space.
+Advanced hybrid intrusion detection system using deep representation learning and
+latent-space anomaly detection. The autoencoder learns compressed behavioral
+patterns from normal traffic while Isolation Forest and One-Class SVM identify
+abnormal flows inside the latent embedding space.
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+
 # =========================================================
-# PERFORMANCE CARDS
+# TOP METRICS
 # =========================================================
 
-c1, c2, c3, c4 = st.columns(4)
+m1, m2, m3, m4 = st.columns(4)
 
-with c1:
+with m1:
     st.markdown("""
     <div class="metric-card">
         <h3>ROC-AUC</h3>
@@ -278,7 +300,7 @@ with c1:
     </div>
     """, unsafe_allow_html=True)
 
-with c2:
+with m2:
     st.markdown("""
     <div class="metric-card">
         <h3>Precision</h3>
@@ -286,7 +308,7 @@ with c2:
     </div>
     """, unsafe_allow_html=True)
 
-with c3:
+with m3:
     st.markdown("""
     <div class="metric-card">
         <h3>False Alarms</h3>
@@ -294,24 +316,25 @@ with c3:
     </div>
     """, unsafe_allow_html=True)
 
-with c4:
+with m4:
     st.markdown("""
     <div class="metric-card">
-        <h3>Flows</h3>
+        <h3>Dataset</h3>
         <h1 style="color:#8b5cf6;">2.83M</h1>
     </div>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+
 # =========================================================
-# INPUT
+# INPUT SECTION
 # =========================================================
 
-st.header("🔍 Analyze Network Traffic")
+st.header("🔍 Network Traffic Analysis")
 
 st.markdown("""
-Enter the 40 numerical network-flow features.
+Enter the 40 network-flow numerical features.
 """)
 
 features = []
@@ -322,23 +345,27 @@ for i in range(40):
 
     with cols[i % 4]:
 
-        value = st.number_input(
+        val = st.number_input(
             f"Feature {i+1}",
             value=0.0,
             format="%.4f"
         )
 
-        features.append(value)
+        features.append(val)
+
 
 # =========================================================
-# PREDICTION
+# ANALYZE BUTTON
 # =========================================================
 
 if st.button("🚀 Analyze Traffic"):
 
     x = np.array(features).reshape(1, -1)
 
-    # Scale
+    # =====================================================
+    # SCALE
+    # =====================================================
+
     x_scaled = scaler.transform(x)
 
     x_tensor = torch.tensor(
@@ -346,7 +373,10 @@ if st.button("🚀 Analyze Traffic"):
         dtype=torch.float32
     )
 
-    # Autoencoder inference
+    # =====================================================
+    # AUTOENCODER
+    # =====================================================
+
     with torch.no_grad():
 
         reconstruction, latent = model(x_tensor)
@@ -355,7 +385,10 @@ if st.button("🚀 Analyze Traffic"):
 
     latent_np = latent.numpy()
 
-    # Reconstruction error
+    # =====================================================
+    # AE SCORE
+    # =====================================================
+
     ae_error = np.mean(
         (x_scaled - reconstruction) ** 2
     )
@@ -366,7 +399,10 @@ if st.button("🚀 Analyze Traffic"):
         1
     )
 
-    # Isolation Forest
+    # =====================================================
+    # ISOLATION FOREST
+    # =====================================================
+
     if_raw = isolation_forest.decision_function(
         latent_np
     )[0]
@@ -377,7 +413,10 @@ if st.button("🚀 Analyze Traffic"):
         1
     )
 
+    # =====================================================
     # OCSVM
+    # =====================================================
+
     svm_raw = ocsvm.decision_function(
         latent_np
     )[0]
@@ -388,8 +427,12 @@ if st.button("🚀 Analyze Traffic"):
         1
     )
 
-    # Ensemble
+    # =====================================================
+    # ENSEMBLE
+    # =====================================================
+
     ensemble_score = (
+
         config["w_ae"] * ae_score
         + config["w_if"] * if_score
         + config["w_svm"] * svm_score
@@ -413,7 +456,7 @@ if st.button("🚀 Analyze Traffic"):
             ⚠️ ATTACK DETECTED
             </h1>
             <p>
-            Suspicious anomalous network behavior detected.
+            Suspicious anomalous traffic detected by latent-space ensemble analysis.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -426,7 +469,7 @@ if st.button("🚀 Analyze Traffic"):
             ✅ NORMAL TRAFFIC
             </h1>
             <p>
-            Network traffic appears benign.
+            Traffic pattern appears benign and within learned normal manifold.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -434,27 +477,27 @@ if st.button("🚀 Analyze Traffic"):
     st.markdown("<br>", unsafe_allow_html=True)
 
     # =====================================================
-    # SCORE METRICS
+    # METRICS
     # =====================================================
 
-    c1, c2, c3, c4 = st.columns(4)
+    r1, r2, r3, r4 = st.columns(4)
 
-    c1.metric(
+    r1.metric(
         "AE Score",
         f"{ae_score:.4f}"
     )
 
-    c2.metric(
+    r2.metric(
         "IF Score",
         f"{if_score:.4f}"
     )
 
-    c3.metric(
+    r3.metric(
         "SVM Score",
         f"{svm_score:.4f}"
     )
 
-    c4.metric(
+    r4.metric(
         "Ensemble",
         f"{ensemble_score:.4f}"
     )
@@ -523,7 +566,7 @@ if st.button("🚀 Analyze Traffic"):
     )
 
     # =====================================================
-    # SCORE BREAKDOWN
+    # BREAKDOWN
     # =====================================================
 
     st.subheader("📈 Ensemble Breakdown")
@@ -548,7 +591,7 @@ if st.button("🚀 Analyze Traffic"):
     )
 
     # =====================================================
-    # TECHNICAL DETAILS
+    # TECH DETAILS
     # =====================================================
 
     with st.expander("🧠 Technical Details"):
@@ -556,29 +599,29 @@ if st.button("🚀 Analyze Traffic"):
         st.markdown(f"""
         ### Inference Summary
 
-        - **Threshold:** `{threshold:.4f}`
-        - **AE Reconstruction Error:** `{ae_error:.6f}`
-        - **Latent Dimension:** `{latent_np.shape[1]}`
-        - **Ensemble Weights**
+        - Threshold = `{threshold:.4f}`
+        - Reconstruction Error = `{ae_error:.6f}`
+        - Latent Dimension = `{latent_np.shape[1]}`
+        - Ensemble Weights:
             - AE = `{config['w_ae']}`
             - IF = `{config['w_if']}`
             - SVM = `{config['w_svm']}`
 
-        ### Architecture
+        ### Pipeline
 
         ```text
         Input Features (40)
                 ↓
         Deep Autoencoder
                 ↓
-        Latent Space (8D)
+        Latent Embedding (8D)
                 ↓
         Isolation Forest
         One-Class SVM
                 ↓
         Weighted Ensemble
                 ↓
-        Final Intrusion Score
+        Final Threat Score
         ```
 
         ### Dataset
@@ -586,7 +629,7 @@ if st.button("🚀 Analyze Traffic"):
         - CICIDS2017
         - 2.83 million flows
         - 14 attack categories
-        - Fully unsupervised anomaly detection
+        - Unsupervised anomaly detection
         """)
 
 # =========================================================
@@ -598,6 +641,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align:center;color:#64748b;font-size:0.9rem;">
 Built by Ankush Jha · IIT Patna<br>
-Deep Learning · Anomaly Detection · Cybersecurity AI
+Deep Learning · Cybersecurity AI · Anomaly Detection
 </div>
 """, unsafe_allow_html=True)
