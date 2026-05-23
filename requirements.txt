@@ -1,8 +1,8 @@
 streamlit
-torch
 scikit-learn
-numpy
+onnxruntime
 pandas
+numpy
 plotly
 joblib
 gdown
