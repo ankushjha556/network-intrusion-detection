@@ -425,42 +425,40 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-        def score_card(title, score, color, desc):
-            pct = min(score * 100, 100)
-            return f"""
-            <div style="background:rgba(255,255,255,0.02);
-                        border:1px solid rgba(255,255,255,0.07);
-                        border-radius:14px;padding:1.2rem 1.4rem;
-                        position:relative;overflow:hidden;">
-                <div style="position:absolute;top:0;left:0;right:0;
-                            height:2px;background:{color};"></div>
-                <div style="font-size:0.6rem;color:#475569;text-transform:uppercase;
-                            letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;
-                            margin-bottom:0.5rem;">{title}</div>
-                <div style="font-size:1.9rem;font-weight:800;color:{color};
-                            font-family:'JetBrains Mono',monospace;
-                            line-height:1;margin-bottom:0.4rem;">{score:.4f}</div>
-                <div style="font-size:0.7rem;color:#475569;margin-bottom:0.8rem;">{desc}</div>
-                <div style="height:3px;background:rgba(255,255,255,0.05);
-                            border-radius:3px;overflow:hidden;">
-                    <div style="height:100%;width:{pct}%;
-                                background:{color};border-radius:3px;"></div>
-                </div>
-            </div>"""
-
-        st.markdown(f"""
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);
-                    gap:1rem;margin:1rem 0;">
-            {score_card("AE Recon Error",   result['ae_score'],  "#10b981",
-                        f"Raw MSE: {result['ae_error']:.6f}")}
-            {score_card("Isolation Forest", result['if_score'],  "#f59e0b",
-                        "8-dim latent space")}
-            {score_card("One-Class SVM",    result['svm_score'], "#8b5cf6",
-                        "8-dim latent space")}
-            {score_card("Ensemble Score",   ens_s,               sc,
-                        "AE×0.7 + IF×0.2 + SVM×0.1")}
-        </div>
-        """, unsafe_allow_html=True)
+       c1, c2, c3, c4 = st.columns(4)
+       for col, title, score, color, desc in [
+           (c1, "AE Recon Error",   result['ae_score'],  "#10b981",
+            f"Raw MSE: {result['ae_error']:.6f}"),
+           (c2, "Isolation Forest", result['if_score'],  "#f59e0b",
+            "8-dim latent space"),
+           (c3, "One-Class SVM",    result['svm_score'], "#8b5cf6",
+            "8-dim latent space"),
+           (c4, "Ensemble Score",   ens_s,               sc,
+            "AE×0.7 + IF×0.2 + SVM×0.1"),
+       ]:
+           pct = min(score * 100, 100)
+           col.markdown(f"""
+           <div style="background:rgba(255,255,255,0.02);
+                       border:1px solid rgba(255,255,255,0.07);
+                       border-radius:14px;padding:1.2rem 1.4rem;
+                       position:relative;overflow:hidden;">
+              <div style="position:absolute;top:0;left:0;right:0;
+                          height:2px;background:{color};"></div>
+              <div style="font-size:0.6rem;color:#475569;text-transform:uppercase;
+                          letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;
+                          margin-bottom:0.5rem;">{title}</div>
+              <div style="font-size:1.9rem;font-weight:800;color:{color};
+                          font-family:'JetBrains Mono',monospace;
+                          line-height:1;margin-bottom:0.4rem;">{score:.4f}</div>
+              <div style="font-size:0.7rem;color:#475569;
+                          margin-bottom:0.8rem;">{desc}</div>
+              <div style="height:3px;background:rgba(255,255,255,0.05);
+                          border-radius:3px;overflow:hidden;">
+                  <div style="height:100%;width:{pct}%;
+                              background:{color};border-radius:3px;"></div>
+              </div>
+           </div>
+           """, unsafe_allow_html=True)
 
         # Latent space bar chart — fixed Plotly API
         latent_vals = result["latent"]
