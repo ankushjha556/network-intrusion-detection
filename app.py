@@ -383,7 +383,11 @@ with tab1:
                 if col in df_up.columns:
                     df_up = df_up.drop(col, axis=1)
             st.dataframe(df_up.head(3), use_container_width=True)
-            row_idx  = st.slider("Row to analyze", 0, len(df_up)-1, 0)
+            if len(df_up) > 1:
+                row_idx = st.slider("Row to analyze", 0, len(df_up)-1, 0)
+            else:
+                row_idx = 0
+                st.info("Single row detected — using row 0")
             features = df_up.iloc[row_idx].values[:40].tolist()
 
     # ── Analyze Button ─────────────────────────────────────────
