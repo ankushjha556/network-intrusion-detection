@@ -234,6 +234,7 @@ with st.sidebar:
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
     threshold_ui = st.slider(
         "Detection Threshold", 0.05, 0.60, 0.298, 0.01,
+        key="det_threshold",
         help="Lower = more sensitive. Higher = more precise."
     )
 
