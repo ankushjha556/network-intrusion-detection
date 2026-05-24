@@ -55,7 +55,6 @@ html, body, [class*="css"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ── Feature names and presets ──────────────────────────────────
 FEAT_NAMES = [
     "Pkt Len Var","Bwd Pkt Len Mean","Pkt Len Mean","Bwd Pkt Len Max",
     "Fwd IAT Std","Tot Len Fwd Pkts","Fwd Pkt Len Mean","Max Pkt Len",
@@ -69,25 +68,24 @@ FEAT_NAMES = [
     "Active Mean","Idle Mean","Fwd Avg Bytes Bulk","Bwd Avg Bytes Bulk",
 ]
 
-NORMAL = [0.5,800.0,600.0,1200.0,500.0,5000.0,700.0,1400.0,
-          1300.0,20.0,800.0,200000.0,150000.0,400000.0,180000.0,
-          300000.0,1000000.0,160000.0,400.0,350.0,700.0,380.0,
-          50000.0,80.0,120.0,5.0,4.0,200.0,100.0,100.0,
-          80.0,0.0,8192.0,8192.0,3.0,20.0,0.0,0.0,0.0,0.0]
+NORMAL = [-0.006373,0.116022,0.091974,0.050000,0.000000,-0.040000,
+           0.477273,0.011561,0.240000,-0.55,0.116022,85000.0,
+           62000.0,170000.0,75000.0,124000.0,620000.0,62000.0,
+           280.0,180.0,0.477273,150.0,12400.0,3.2,6.5,8.0,
+           5.0,40.0,20.0,20.0,1.472222,-0.000164,0.0,0.0,
+           -0.000050,0.0,0.0,-0.022222,0.000000,0.0]
 
-ATTACK = [50000.0,0.0,8000.0,65535.0,2000000.0,100000.0,7500.0,
-          65535.0,65535.0,32.0,0.0,5000000.0,3000000.0,10000000.0,
-          4000000.0,8000000.0,50000000.0,4000000.0,5000.0,4500.0,
-          0.0,4800.0,2000000.0,500.0,800.0,100.0,0.0,0.0,0.0,0.0,
-          64.0,1.0,1024.0,0.0,0.0,8.0,0.0,0.0,0.0,0.0]
+ATTACK = [86.555992,10.279006,9.983304,15.232143,0.047812,1.577143,
+          1.787879,8.202312,4.013333,0.5,10.279006,8000000.0,
+          5000000.0,16000000.0,6500000.0,12000000.0,80000000.0,
+          6000000.0,8500.0,7200.0,1.787879,7800.0,4500000.0,
+          850.0,1200.0,200.0,0.0,0.0,0.0,0.0,
+          -0.055556,0.058273,7.458807,0.0,0.081199,1.0,
+          0.0,1.044444,0.136065,0.0]
 
-# ── Session state for presets ──────────────────────────────────
-if "defaults" not in st.session_state:
-    st.session_state.defaults = NORMAL.copy()
+if "feat_defaults" not in st.session_state:
+    st.session_state.feat_defaults = NORMAL.copy()
 
-# ══════════════════════════════════════════════════════════════
-# MODEL LOADING
-# ══════════════════════════════════════════════════════════════
 GDRIVE = {
     "models/autoencoder.onnx"     : "1hKPGtRbI1KOjNNCFmg7SJpkVQHkBdeNF",
     "models/isolation_forest.pkl" : "1OGFhLXB68-zpLCCiS2I19HY-zg8kC7og",
@@ -101,60 +99,35 @@ def load_models():
     os.makedirs("models", exist_ok=True)
     for path, fid in GDRIVE.items():
         if not os.path.exists(path):
-            gdown.download(
-                f"https://drive.google.com/uc?id={fid}",
-                path, quiet=False
-            )
-    sess   = ort.InferenceSession(
-        "models/autoencoder.onnx",
-        providers=["CPUExecutionProvider"]
-    )
+            gdown.download(f"https://drive.google.com/uc?id={fid}",
+                           path, quiet=False)
+    sess   = ort.InferenceSession("models/autoencoder.onnx",
+                                   providers=["CPUExecutionProvider"])
     iso    = joblib.load("models/isolation_forest.pkl")
     ocsvm  = joblib.load("models/ocsvm.pkl")
     scaler = joblib.load("models/scaler_ae.pkl")
     config = joblib.load("models/config.pkl")
     return sess, iso, ocsvm, scaler, config
 
-# ══════════════════════════════════════════════════════════════
-# PREDICTION
-# ══════════════════════════════════════════════════════════════
 def predict(features, sess, iso, ocsvm, scaler, config, threshold):
     x        = np.array(features, dtype=np.float32).reshape(1, -1)
     x_scaled = scaler.transform(x).astype(np.float32)
     x_scaled = np.clip(x_scaled, -10, 10)
-
-    # ONNX → recon(1,40) + latent(1,8)
     recon, latent = sess.run(None, {"input": x_scaled})
-
-    # AE score
     err      = float(np.mean((x_scaled - recon) ** 2))
     ae_score = float(np.clip(np.log1p(err) / 2.5, 0, 1))
-
-    # IF on 8-dim latent
     if_raw   = iso.decision_function(latent)
-    if_score = float(np.clip(1 - (float(if_raw[0]) + 0.15) / 0.30, 0, 1))
-
-    # SVM on 8-dim latent
-    svm_raw   = ocsvm.decision_function(latent)
-    svm_score = float(np.clip(1 - (float(svm_raw[0]) + 0.5) / 1.0, 0, 1))
-
-    # Ensemble
-    w_ae  = config.get('w_ae',  0.7)
-    w_if  = config.get('w_if',  0.2)
-    w_svm = config.get('w_svm', 0.1)
-    ens   = float(w_ae * ae_score + w_if * if_score + w_svm * svm_score)
-    conf  = min(abs(ens - threshold) / (threshold + 1e-8) * 100, 100.0)
-
-    return {
-        "ensemble"  : ens,
-        "ae_score"  : ae_score,
-        "if_score"  : if_score,
-        "svm_score" : svm_score,
-        "is_attack" : ens >= threshold,
-        "confidence": conf,
-        "ae_error"  : err,
-        "latent"    : latent[0].tolist(),
-    }
+    if_score = float(np.clip(1-(float(if_raw[0])+0.15)/0.30, 0, 1))
+    svm_raw  = ocsvm.decision_function(latent)
+    svm_score= float(np.clip(1-(float(svm_raw[0])+0.5)/1.0, 0, 1))
+    w_ae = config.get('w_ae', 0.7)
+    w_if = config.get('w_if', 0.2)
+    w_svm= config.get('w_svm',0.1)
+    ens  = float(w_ae*ae_score + w_if*if_score + w_svm*svm_score)
+    conf = min(abs(ens-threshold)/(threshold+1e-8)*100, 100.0)
+    return {"ensemble":ens,"ae_score":ae_score,"if_score":if_score,
+            "svm_score":svm_score,"is_attack":ens>=threshold,
+            "confidence":conf,"ae_error":err,"latent":latent[0].tolist()}
 
 # ══════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -182,15 +155,15 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     for k, v, c in [
-        ("ROC-AUC",       "0.7168",     "#10b981"),
-        ("AUPRC",         "0.5853",     "#10b981"),
-        ("Precision",     "82.64%",     "#06b6d4"),
-        ("vs Random",     "3×",         "#f59e0b"),
-        ("AE Separation", "16.90×",     "#8b5cf6"),
-        ("False Alarms",  "2.17%",      "#10b981"),
-        ("Dataset",       "CICIDS2017", "#94a3b8"),
-        ("Records",       "2,830,743",  "#94a3b8"),
-        ("Attack Types",  "14 classes", "#ef4444"),
+        ("ROC-AUC",       "0.7168",      "#10b981"),
+        ("AUPRC",         "0.5853",      "#10b981"),
+        ("Precision",     "82.64%",      "#06b6d4"),
+        ("vs Random",     "3×",          "#f59e0b"),
+        ("AE Separation", "16.90×",      "#8b5cf6"),
+        ("False Alarms",  "2.17%",       "#10b981"),
+        ("Dataset",       "CICIDS2017",  "#94a3b8"),
+        ("Records",       "2,830,743",   "#94a3b8"),
+        ("Attack Types",  "14 classes",  "#ef4444"),
         ("Method",        "Unsupervised","#f59e0b"),
     ]:
         st.markdown(f"""
@@ -208,11 +181,14 @@ with st.sidebar:
                 font-family:'JetBrains Mono',monospace;margin-bottom:0.8rem;">
         ⬡ Detection Pipeline
     </div>
-    <div style="background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.1);
-                border-radius:12px;padding:1rem;display:flex;flex-direction:column;gap:0.6rem;">
+    <div style="background:rgba(16,185,129,0.05);
+                border:1px solid rgba(16,185,129,0.1);
+                border-radius:12px;padding:1rem;
+                display:flex;flex-direction:column;gap:0.6rem;">
     """, unsafe_allow_html=True)
+
     for n, t in [
-        ("1","40 network flow features → input"),
+        ("1","40 network flow features as input"),
         ("2","StandardScaler normalizes features"),
         ("3","AE encodes to 8-dim latent space"),
         ("4","Reconstruction error → AE score"),
@@ -226,12 +202,14 @@ with st.sidebar:
                         border:1px solid rgba(16,185,129,0.25);
                         display:flex;align-items:center;justify-content:center;
                         font-size:0.58rem;color:#10b981;
-                        font-family:'JetBrains Mono',monospace;font-weight:600;">{n}</div>
+                        font-family:'JetBrains Mono',monospace;
+                        font-weight:600;">{n}</div>
             <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">{t}</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
     threshold_ui = st.slider(
         "Detection Threshold", 0.05, 0.60, 0.298, 0.01,
         key="det_threshold",
@@ -247,8 +225,9 @@ st.markdown("""
                 background:rgba(16,185,129,0.08);
                 border:1px solid rgba(16,185,129,0.22);
                 border-radius:50px;padding:6px 18px;margin-bottom:1.5rem;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#10b981;
-                     box-shadow:0 0 10px #10b981;display:inline-block;"></span>
+        <span style="width:7px;height:7px;border-radius:50%;
+                     background:#10b981;box-shadow:0 0 10px #10b981;
+                     display:inline-block;"></span>
         <span style="font-family:'JetBrains Mono',monospace;font-size:0.66rem;
                      color:#10b981;letter-spacing:0.12em;text-transform:uppercase;">
             Unsupervised · Zero Attack Labels · CICIDS2017
@@ -273,7 +252,8 @@ st.markdown("""
     <div style="display:inline-grid;grid-template-columns:repeat(4,1fr);
                 background:rgba(255,255,255,0.02);
                 border:1px solid rgba(255,255,255,0.07);
-                border-radius:18px;overflow:hidden;max-width:700px;width:100%;">
+                border-radius:18px;overflow:hidden;
+                max-width:700px;width:100%;">
         <div style="padding:1.1rem 1rem;border-right:1px solid rgba(255,255,255,0.07);">
             <div style="font-size:1.5rem;font-weight:700;color:#10b981;
                         font-family:'JetBrains Mono',monospace;">0.7168</div>
@@ -334,53 +314,49 @@ with tab1:
         st.markdown("""
         <div style="font-size:0.72rem;color:#475569;
                     font-family:'JetBrains Mono',monospace;margin-bottom:1rem;">
-            Load a preset or manually adjust the 40 network flow features below.
+            Load a preset or adjust the 40 network flow features below.
         </div>""", unsafe_allow_html=True)
 
-        # ── Preset buttons with session_state ──────────────────
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("🟢 Normal Traffic Sample", use_container_width=True):
-                st.session_state.defaults = NORMAL.copy()
+            if st.button("🟢 Normal Traffic", use_container_width=True):
+                st.session_state.feat_defaults = NORMAL.copy()
                 st.rerun()
         with c2:
-            if st.button("🔴 Attack Traffic Sample", use_container_width=True):
-                st.session_state.defaults = ATTACK.copy()
+            if st.button("🔴 Attack Traffic", use_container_width=True):
+                st.session_state.feat_defaults = ATTACK.copy()
                 st.rerun()
         with c3:
-            if st.button("🎲 Random Sample", use_container_width=True):
-                st.session_state.defaults = [
-                    round(abs(float(np.random.randn())) * 500, 2)
+            if st.button("🎲 Random Sample",  use_container_width=True):
+                st.session_state.feat_defaults = [
+                    round(float(np.random.randn()*0.5), 4)
                     for _ in range(40)
                 ]
                 st.rerun()
 
         st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-
-        # ── Feature inputs using session_state defaults ─────────
         cols = st.columns(8)
         vals = []
         for i, name in enumerate(FEAT_NAMES):
             with cols[i % 8]:
                 v = st.number_input(
                     name,
-                    value=float(st.session_state.defaults[i]),
-                    format="%.2f",
-                    key=f"feat_{i}",
-                    label_visibility="visible"
+                    value=float(st.session_state.feat_defaults[i]),
+                    format="%.4f",
+                    key=f"feat_{i}"
                 )
                 vals.append(v)
         features = vals
 
     else:
         uploaded_csv = st.file_uploader(
-            "Upload CSV (40 feature columns, no label)",
+            "Upload CSV (40 feature columns)",
             type=["csv"],
             label_visibility="collapsed"
         )
         if uploaded_csv:
             df_up = pd.read_csv(uploaded_csv)
-            for col in [' Label', 'Label', 'Class']:
+            for col in [' Label','Label','Class']:
                 if col in df_up.columns:
                     df_up = df_up.drop(col, axis=1)
             st.dataframe(df_up.head(3), use_container_width=True)
@@ -391,18 +367,13 @@ with tab1:
                 st.info("Single row detected — using row 0")
             features = df_up.iloc[row_idx].values[:40].tolist()
 
-    # ── Analyze Button ─────────────────────────────────────────
-    if features and st.button(
-        "🔍 Analyze Network Traffic",
-        use_container_width=True,
-        type="primary"
-    ):
+    if features and st.button("🔍 Analyze Network Traffic",
+                               use_container_width=True,
+                               type="primary"):
         with st.spinner("Running inference pipeline..."):
             sess, iso, ocsvm, scaler, config = load_models()
-            result = predict(
-                features, sess, iso, ocsvm,
-                scaler, config, threshold_ui
-            )
+            result = predict(features, sess, iso, ocsvm,
+                             scaler, config, threshold_ui)
 
         is_atk  = result["is_attack"]
         ens_s   = result["ensemble"]
@@ -411,11 +382,14 @@ with tab1:
         vbg     = "rgba(239,68,68,0.1)"   if is_atk else "rgba(16,185,129,0.1)"
         vbrd    = "rgba(239,68,68,0.3)"   if is_atk else "rgba(16,185,129,0.3)"
 
+        # Verdict banner
         st.markdown(f"""
         <div style="background:{vbg};border:1px solid {vbrd};
                     border-radius:14px;padding:1.5rem 2rem;
                     text-align:center;margin:1.5rem 0;">
-            <div style="font-size:1.8rem;font-weight:800;color:{sc};">{verdict}</div>
+            <div style="font-size:1.8rem;font-weight:800;color:{sc};">
+                {verdict}
+            </div>
             <div style="font-size:0.8rem;color:#64748b;
                         font-family:'JetBrains Mono',monospace;margin-top:0.4rem;">
                 Ensemble: {ens_s:.4f} &nbsp;·&nbsp;
@@ -425,42 +399,48 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-       c1, c2, c3, c4 = st.columns(4)
-       for col, title, score, color, desc in [
-           (c1, "AE Recon Error",   result['ae_score'],  "#10b981",
-            f"Raw MSE: {result['ae_error']:.6f}"),
-           (c2, "Isolation Forest", result['if_score'],  "#f59e0b",
-            "8-dim latent space"),
-           (c3, "One-Class SVM",    result['svm_score'], "#8b5cf6",
-            "8-dim latent space"),
-           (c4, "Ensemble Score",   ens_s,               sc,
-            "AE×0.7 + IF×0.2 + SVM×0.1"),
-       ]:
-           pct = min(score * 100, 100)
-           col.markdown(f"""
-           <div style="background:rgba(255,255,255,0.02);
-                       border:1px solid rgba(255,255,255,0.07);
-                       border-radius:14px;padding:1.2rem 1.4rem;
-                       position:relative;overflow:hidden;">
-              <div style="position:absolute;top:0;left:0;right:0;
-                          height:2px;background:{color};"></div>
-              <div style="font-size:0.6rem;color:#475569;text-transform:uppercase;
-                          letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;
-                          margin-bottom:0.5rem;">{title}</div>
-              <div style="font-size:1.9rem;font-weight:800;color:{color};
-                          font-family:'JetBrains Mono',monospace;
-                          line-height:1;margin-bottom:0.4rem;">{score:.4f}</div>
-              <div style="font-size:0.7rem;color:#475569;
-                          margin-bottom:0.8rem;">{desc}</div>
-              <div style="height:3px;background:rgba(255,255,255,0.05);
-                          border-radius:3px;overflow:hidden;">
-                  <div style="height:100%;width:{pct}%;
-                              background:{color};border-radius:3px;"></div>
-              </div>
-           </div>
-           """, unsafe_allow_html=True)
+        # ── Score cards — each in its own column ──────────────
+        col1, col2, col3, col4 = st.columns(4)
+        for col, title, score, color, desc in [
+            (col1, "AE Recon Error",   result['ae_score'],  "#10b981",
+             f"Raw MSE: {result['ae_error']:.4f}"),
+            (col2, "Isolation Forest", result['if_score'],  "#f59e0b",
+             "8-dim latent space"),
+            (col3, "One-Class SVM",    result['svm_score'], "#8b5cf6",
+             "8-dim latent space"),
+            (col4, "Ensemble Score",   ens_s,               sc,
+             "AE×0.7 + IF×0.2 + SVM×0.1"),
+        ]:
+            pct = min(score * 100, 100)
+            col.markdown(f"""
+            <div style="background:rgba(255,255,255,0.02);
+                        border:1px solid rgba(255,255,255,0.07);
+                        border-radius:14px;padding:1.2rem 1.4rem;
+                        position:relative;overflow:hidden;height:100%;">
+                <div style="position:absolute;top:0;left:0;right:0;
+                            height:3px;background:{color};
+                            border-radius:14px 14px 0 0;"></div>
+                <div style="font-size:0.58rem;color:#475569;
+                            text-transform:uppercase;letter-spacing:0.1em;
+                            font-family:'JetBrains Mono',monospace;
+                            margin-bottom:0.6rem;margin-top:0.3rem;">{title}</div>
+                <div style="font-size:2rem;font-weight:800;color:{color};
+                            font-family:'JetBrains Mono',monospace;
+                            line-height:1;margin-bottom:0.4rem;">{score:.4f}</div>
+                <div style="font-size:0.7rem;color:#475569;
+                            margin-bottom:0.9rem;">{desc}</div>
+                <div style="height:3px;background:rgba(255,255,255,0.06);
+                            border-radius:3px;overflow:hidden;">
+                    <div style="height:100%;width:{pct:.1f}%;
+                                background:{color};border-radius:3px;
+                                transition:width 0.5s ease;"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-        # Latent space bar chart — fixed Plotly API
+        st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
+        # ── Latent space chart ─────────────────────────────────
         latent_vals = result["latent"]
         fig_lat = go.Figure(go.Bar(
             x=[f"z{i+1}" for i in range(8)],
@@ -468,30 +448,27 @@ with tab1:
             marker_color=["#ef4444" if abs(v) > 1.5 else "#10b981"
                           for v in latent_vals],
             marker_line_width=0,
+            text=[f"{v:.2f}" for v in latent_vals],
+            textposition="outside",
+            textfont=dict(color="white", size=10),
         ))
         fig_lat.update_layout(
-            title=dict(
-                text="Latent Space Representation (8 dimensions)",
-                font=dict(color="white", size=12)
-            ),
+            title=dict(text="Latent Space Representation (8 dimensions) — Red bars indicate anomalous activations",
+                       font=dict(color="white", size=11)),
             paper_bgcolor="#0d1117",
             plot_bgcolor="#161b22",
             font=dict(color="#94a3b8"),
             xaxis=dict(gridcolor="#1e293b", tickcolor="#475569"),
             yaxis=dict(
-                gridcolor="#1e293b",
-                tickcolor="#475569",
-                title=dict(
-                    text="Activation",
-                    font=dict(color="#64748b")
-                )
+                gridcolor="#1e293b", tickcolor="#475569",
+                title=dict(text="Activation", font=dict(color="#64748b"))
             ),
-            height=250,
+            height=260,
             margin=dict(l=20, r=20, t=45, b=20)
         )
         st.plotly_chart(fig_lat, use_container_width=True)
 
-        # Gauge chart
+        # ── Gauge chart ────────────────────────────────────────
         fig_gauge = go.Figure(go.Indicator(
             mode  = "gauge+number+delta",
             value = ens_s * 100,
@@ -519,8 +496,7 @@ with tab1:
                    "font": {"color": "#94a3b8", "size": 14}}
         ))
         fig_gauge.update_layout(
-            height=280,
-            paper_bgcolor="#0d1117",
+            height=280, paper_bgcolor="#0d1117",
             font={"color": "#94a3b8"},
             margin=dict(l=30, r=30, t=50, b=10)
         )
@@ -537,21 +513,24 @@ with tab2:
         Evaluation on 566,149 held-out network flows · CICIDS2017
     </div>""", unsafe_allow_html=True)
 
-    st.markdown('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem;">', unsafe_allow_html=True)
-    for k, v, c, d in [
-        ("ROC-AUC",       "0.7168",  "#10b981", "Area under ROC"),
-        ("AUPRC",         "0.5853",  "#06b6d4", "3× random baseline"),
-        ("Precision",     "82.6%",   "#8b5cf6", "When alert fires"),
-        ("F1 Score",      "0.5585",  "#f59e0b", "Harmonic mean P/R"),
-        ("Recall",        "42.2%",   "#10b981", "Attacks caught"),
-        ("False Alarms",  "2.17%",   "#06b6d4", "Normal flagged"),
-        ("AE Separation", "16.90×",  "#8b5cf6", "Normal vs attack"),
-        ("TP / Total",    "47K/111K","#ef4444", "At best threshold"),
+    # Metrics using Streamlit columns — no raw HTML issue
+    m1,m2,m3,m4 = st.columns(4)
+    m5,m6,m7,m8 = st.columns(4)
+    for col, k, v, c, d in [
+        (m1,"ROC-AUC",       "0.7168",  "#10b981","Area under ROC"),
+        (m2,"AUPRC",         "0.5853",  "#06b6d4","3× random baseline"),
+        (m3,"Precision",     "82.6%",   "#8b5cf6","When alert fires"),
+        (m4,"F1 Score",      "0.5585",  "#f59e0b","Harmonic mean P/R"),
+        (m5,"Recall",        "42.2%",   "#10b981","Attacks caught"),
+        (m6,"False Alarms",  "2.17%",   "#06b6d4","Normal flagged"),
+        (m7,"AE Separation", "16.90×",  "#8b5cf6","Normal vs attack"),
+        (m8,"TP / Total",    "47K/111K","#ef4444","At best threshold"),
     ]:
-        st.markdown(f"""
+        col.markdown(f"""
         <div style="background:rgba(255,255,255,0.02);
                     border:1px solid rgba(255,255,255,0.07);
-                    border-radius:14px;padding:1.1rem 1.2rem;">
+                    border-radius:14px;padding:1.1rem 1.2rem;
+                    margin-bottom:1rem;">
             <div style="font-size:0.58rem;color:#334155;text-transform:uppercase;
                         letter-spacing:0.1em;font-family:'JetBrains Mono',monospace;
                         margin-bottom:0.4rem;">{k}</div>
@@ -560,8 +539,8 @@ with tab2:
                         line-height:1;margin-bottom:0.3rem;">{v}</div>
             <div style="font-size:0.7rem;color:#475569;">{d}</div>
         </div>""", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
+    # Model comparison chart
     fig_comp = go.Figure()
     fig_comp.add_trace(go.Bar(
         name="ROC-AUC",
@@ -569,7 +548,7 @@ with tab2:
         y=[0.789, 0.718, 0.641, 0.717],
         marker_color="#10b981", marker_line_width=0,
         text=["0.789","0.718","0.641","0.717"],
-        textposition="outside", textfont=dict(color="white", size=11)
+        textposition="outside", textfont=dict(color="white",size=11)
     ))
     fig_comp.add_trace(go.Bar(
         name="AUPRC",
@@ -577,57 +556,49 @@ with tab2:
         y=[0.620, 0.438, 0.529, 0.585],
         marker_color="#f59e0b", marker_line_width=0,
         text=["0.620","0.438","0.529","0.585"],
-        textposition="outside", textfont=dict(color="white", size=11)
+        textposition="outside", textfont=dict(color="white",size=11)
     ))
     fig_comp.update_layout(
         title=dict(text="Model Comparison — ROC-AUC vs AUPRC",
-                   font=dict(color="white", size=13)),
+                   font=dict(color="white",size=13)),
         barmode="group", bargap=0.25, bargroupgap=0.1,
         paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
         font=dict(color="#94a3b8"),
-        legend=dict(bgcolor="#161b22", bordercolor="#334155",
+        legend=dict(bgcolor="#161b22",bordercolor="#334155",
                     font=dict(color="white")),
-        yaxis=dict(range=[0, 1.0], gridcolor="#1e293b"),
-        height=360, margin=dict(l=20, r=20, t=50, b=20)
+        yaxis=dict(range=[0,1.0],gridcolor="#1e293b"),
+        height=360, margin=dict(l=20,r=20,t=50,b=20)
     )
     st.plotly_chart(fig_comp, use_container_width=True)
 
+    # Ablation table using columns
     st.markdown("""
     <div style="background:rgba(255,255,255,0.02);
                 border:1px solid rgba(255,255,255,0.07);
-                border-radius:14px;padding:1.4rem;margin-top:1rem;">
+                border-radius:14px;padding:1.4rem;">
         <div style="font-size:0.6rem;font-weight:600;color:#64748b;
                     text-transform:uppercase;letter-spacing:0.12em;
                     font-family:'JetBrains Mono',monospace;margin-bottom:1rem;">
-            Ablation Study
-        </div>
-    """, unsafe_allow_html=True)
+            Ablation Study — Contribution of Each Component
+        </div>""", unsafe_allow_html=True)
+
+    hcols = st.columns([2,1,1,1,1])
+    for col, label in zip(hcols, ["Model","ROC-AUC","AUPRC","F1","Recall"]):
+        col.markdown(f"<div style='font-size:0.65rem;color:#334155;font-family:\"JetBrains Mono\",monospace;padding:0.3rem 0;border-bottom:1px solid rgba(255,255,255,0.08);font-weight:700;'>{label}</div>", unsafe_allow_html=True)
 
     for m, roc, ap, f1, rec, c, bold in [
-        ("Model",                 "ROC-AUC","AUPRC","F1","Recall","#475569",False),
-        ("AE only",               "0.7891","0.6200","0.5743","0.4404","#10b981",False),
-        ("IF only (latent)",      "0.7183","0.4381","0.5106","0.4629","#f59e0b",False),
-        ("SVM only (latent)",     "0.6405","0.5289","0.5619","0.4018","#8b5cf6",False),
-        ("AE + IF",               "0.7243","0.5586","0.5516","0.4434","#06b6d4",False),
-        ("AE + SVM",              "0.6423","0.5597","0.5764","0.4320","#06b6d4",False),
-        ("Full Ensemble ◄ BEST",  "0.7168","0.5853","0.5585","0.4218","#ef4444",True),
+        ("AE only",              "0.7891","0.6200","0.5743","0.4404","#10b981",False),
+        ("IF only (latent)",     "0.7183","0.4381","0.5106","0.4629","#f59e0b",False),
+        ("SVM only (latent)",    "0.6405","0.5289","0.5619","0.4018","#8b5cf6",False),
+        ("AE + IF",              "0.7243","0.5586","0.5516","0.4434","#06b6d4",False),
+        ("AE + SVM",             "0.6423","0.5597","0.5764","0.4320","#06b6d4",False),
+        ("Full Ensemble ◄ BEST", "0.7168","0.5853","0.5585","0.4218","#ef4444",True),
     ]:
         fw = "700" if bold else "400"
-        st.markdown(f"""
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;
-                    padding:0.55rem 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-            <span style="font-size:0.74rem;color:{c};
-                         font-family:'JetBrains Mono',monospace;
-                         font-weight:{fw};">{m}</span>
-            <span style="font-size:0.74rem;color:#94a3b8;
-                         font-family:'JetBrains Mono',monospace;text-align:center;">{roc}</span>
-            <span style="font-size:0.74rem;color:#94a3b8;
-                         font-family:'JetBrains Mono',monospace;text-align:center;">{ap}</span>
-            <span style="font-size:0.74rem;color:#94a3b8;
-                         font-family:'JetBrains Mono',monospace;text-align:center;">{f1}</span>
-            <span style="font-size:0.74rem;color:#94a3b8;
-                         font-family:'JetBrains Mono',monospace;text-align:center;">{rec}</span>
-        </div>""", unsafe_allow_html=True)
+        row = st.columns([2,1,1,1,1])
+        row[0].markdown(f"<div style='font-size:0.74rem;color:{c};font-family:\"JetBrains Mono\",monospace;padding:0.4rem 0;border-bottom:1px solid rgba(255,255,255,0.04);font-weight:{fw};'>{m}</div>", unsafe_allow_html=True)
+        for col, val in zip(row[1:], [roc,ap,f1,rec]):
+            col.markdown(f"<div style='font-size:0.74rem;color:#94a3b8;font-family:\"JetBrains Mono\",monospace;padding:0.4rem 0;border-bottom:1px solid rgba(255,255,255,0.04);text-align:center;'>{val}</div>", unsafe_allow_html=True)
 
     st.markdown("""
         <div style="margin-top:0.8rem;font-size:0.7rem;color:#334155;
@@ -649,15 +620,14 @@ with tab3:
                     border-radius:14px;padding:1.4rem;">
             <div style="font-size:0.6rem;font-weight:600;color:#64748b;
                         text-transform:uppercase;letter-spacing:0.12em;
-                        font-family:'JetBrains Mono',monospace;margin-bottom:1rem;">
-                Deep Autoencoder
-            </div>
+                        font-family:'JetBrains Mono',monospace;
+                        margin-bottom:1rem;">Deep Autoencoder</div>
         """, unsafe_allow_html=True)
         for k, v, c in [
-            ("Architecture",  "40→32→24→16→8→16→24→32→40", "#10b981"),
+            ("Architecture",  "40→32→24→16→8→16→24→32→40","#10b981"),
             ("Latent dim",    "8 dimensions",               "#10b981"),
             ("Activation",    "GELU + BatchNorm",           "#06b6d4"),
-            ("Dropout",       "0.2 in encoder + decoder",   "#06b6d4"),
+            ("Dropout",       "0.2 encoder + decoder",      "#06b6d4"),
             ("Loss",          "MSE + 1e-4·‖z‖²",           "#f59e0b"),
             ("Optimizer",     "AdamW lr=1e-3 wd=1e-4",     "#f59e0b"),
             ("Scheduler",     "CosineAnnealingLR T=60",     "#8b5cf6"),
@@ -666,7 +636,8 @@ with tab3:
             ("AE Separation", "16.90× normal vs attack",    "#ef4444"),
         ]:
             st.markdown(f"""
-            <div style="display:flex;justify-content:space-between;padding:0.45rem 0;
+            <div style="display:flex;justify-content:space-between;
+                        padding:0.45rem 0;
                         border-bottom:1px solid rgba(255,255,255,0.03);">
                 <span style="font-size:0.72rem;color:#475569;
                              font-family:'JetBrains Mono',monospace;">{k}</span>
@@ -682,9 +653,8 @@ with tab3:
                     border-radius:14px;padding:1.4rem;">
             <div style="font-size:0.6rem;font-weight:600;color:#64748b;
                         text-transform:uppercase;letter-spacing:0.12em;
-                        font-family:'JetBrains Mono',monospace;margin-bottom:1rem;">
-                Anomaly Models + Dataset
-            </div>
+                        font-family:'JetBrains Mono',monospace;
+                        margin-bottom:1rem;">Anomaly Models + Dataset</div>
         """, unsafe_allow_html=True)
         for k, v, c in [
             ("IF Trees",      "300 · contamination=0.01",   "#f59e0b"),
@@ -699,7 +669,8 @@ with tab3:
             ("Deployment",    "ONNX 33KB — no PyTorch",     "#94a3b8"),
         ]:
             st.markdown(f"""
-            <div style="display:flex;justify-content:space-between;padding:0.45rem 0;
+            <div style="display:flex;justify-content:space-between;
+                        padding:0.45rem 0;
                         border-bottom:1px solid rgba(255,255,255,0.03);">
                 <span style="font-size:0.72rem;color:#475569;
                              font-family:'JetBrains Mono',monospace;">{k}</span>
@@ -724,9 +695,10 @@ with tab3:
             <span style="color:#ef4444;font-weight:600;">16.90×</span>
             between benign and attack traffic. Both IF and OCSVM operate in the
             <span style="color:#8b5cf6;font-weight:600;">8-dimensional latent space</span>
-            — not raw features — making the ensemble more powerful.
-            Core finding: <span style="color:#f59e0b;font-weight:600;">anomalies are
-            detectable with zero labeled attack data</span>.
+            — not raw features — making the system more robust.
+            Core hypothesis validated:
+            <span style="color:#f59e0b;font-weight:600;">anomalies are detectable
+            with zero labeled attack data</span>.
         </div>
     </div>
     """, unsafe_allow_html=True)
