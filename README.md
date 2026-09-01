@@ -245,5 +245,5 @@ This project is intended for research, education, and experimentation. It is not
 ## Author
 
 Ankush Jha  
-BS, IIT Patna  
+IIT Patna  
 GitHub: [@ankushjha556](https://github.com/ankushjha556)
